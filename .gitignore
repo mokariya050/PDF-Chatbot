@@ -1,0 +1,88 @@
+# ============================================================
+# AI PDF Chatbot - .gitignore
+# ============================================================
+# This file tells Git which files/folders to NEVER track.
+# Patterns use glob syntax: * matches anything, / means directory.
+# ============================================================
+
+# -----------------------------------------------------------
+# Environment & Secrets
+# -----------------------------------------------------------
+# NEVER commit real API keys or secrets.
+# Use .env.example to show required variables without values.
+.env
+
+# -----------------------------------------------------------
+# Python Runtime Files
+# -----------------------------------------------------------
+# __pycache__: Python compiles .py → .pyc for faster imports.
+# These are auto-generated and machine-specific.
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging artifacts
+*.egg-info/
+*.egg
+dist/
+build/
+
+# -----------------------------------------------------------
+# Virtual Environment
+# -----------------------------------------------------------
+# Contains 500MB+ of installed packages.
+# Anyone can recreate it with: pip install -r requirements.txt
+venv/
+env/
+.venv/
+
+# -----------------------------------------------------------
+# IDE & Editor Files
+# -----------------------------------------------------------
+# Each developer uses different editors with different settings.
+# These should never be shared.
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# -----------------------------------------------------------
+# Project Runtime Data
+# -----------------------------------------------------------
+# User-uploaded PDFs — runtime data, not source code.
+uploads/*
+!uploads/.gitkeep
+
+# FAISS vector store files — generated from PDFs at runtime.
+vectorstore/*
+!vectorstore/.gitkeep
+
+# Application log files — generated during execution.
+logs/*
+!logs/.gitkeep
+
+# -----------------------------------------------------------
+# Testing & Coverage
+# -----------------------------------------------------------
+# Test artifacts and coverage reports.
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# -----------------------------------------------------------
+# Jupyter Notebooks (if used for experimentation)
+# -----------------------------------------------------------
+.ipynb_checkpoints/
+
+# -----------------------------------------------------------
+# Frontend (React + Vite)
+# -----------------------------------------------------------
+# Node.js dependencies — recreated via `npm install`.
+node_modules/
+
+# Vite build output
+frontend/dist/

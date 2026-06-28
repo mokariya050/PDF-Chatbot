@@ -1,0 +1,73 @@
+# ============================================================
+# AI PDF Chatbot - Requirements
+# ============================================================
+# Install: pip install -r requirements.txt
+# Python:  3.12+
+# ============================================================
+
+# -----------------------------------------------------------
+# LangChain Core & Ecosystem
+# -----------------------------------------------------------
+# langchain: The orchestration framework for building LLM apps.
+#   - Provides chains, prompt templates, and the LCEL pipeline.
+langchain>=0.3.0
+
+# langchain-community: Community-maintained integrations.
+#   - Includes FAISS vector store, document loaders, and more.
+langchain-community>=0.3.0
+
+# langchain-google-genai: Official Google Gemini integration.
+#   - Provides ChatGoogleGenerativeAI for Gemini API access.
+langchain-google-genai>=2.0.0
+
+# langchain-huggingface: Official HuggingFace integration.
+#   - Provides HuggingFaceEmbeddings for local embedding models.
+langchain-huggingface>=0.1.0
+
+# -----------------------------------------------------------
+# Vector Database
+# -----------------------------------------------------------
+# faiss-cpu: Facebook AI Similarity Search (CPU version).
+#   - Fast, in-memory vector similarity search.
+#   - Use faiss-gpu instead if you have CUDA-compatible GPU.
+faiss-cpu>=1.7.0
+
+# -----------------------------------------------------------
+# Document Processing
+# -----------------------------------------------------------
+# pypdf: PDF text extraction library.
+#   - Used by LangChain's PyPDFLoader under the hood.
+pypdf>=4.0.0
+
+# -----------------------------------------------------------
+# Embeddings Model
+# -----------------------------------------------------------
+# sentence-transformers: HuggingFace sentence embedding models.
+#   - Downloads and runs models locally (no API key needed).
+sentence-transformers>=3.0.0
+
+# -----------------------------------------------------------
+# Web Framework
+# -----------------------------------------------------------
+# flask: Lightweight WSGI web framework for the REST API backend.
+flask>=3.0.0
+
+# flask-cors: Cross-Origin Resource Sharing support for Flask.
+#   - Required so the React frontend (different port) can call the API.
+flask-cors>=4.0.0
+
+# -----------------------------------------------------------
+# Environment & Configuration
+# -----------------------------------------------------------
+# python-dotenv: Loads environment variables from .env files.
+#   - Keeps API keys out of source code.
+python-dotenv>=1.0.0
+
+# -----------------------------------------------------------
+# Testing
+# -----------------------------------------------------------
+# pytest: Testing framework for Python.
+pytest>=8.0.0
+
+# pytest-cov: Code coverage plugin for pytest.
+pytest-cov>=5.0.0
