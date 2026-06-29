@@ -94,6 +94,8 @@ class Settings:
 
     # --- Required Settings (no defaults) ---
     GOOGLE_API_KEY: str
+    MONGODB_URI: str
+    JWT_SECRET_KEY: str
 
     # --- LLM Settings ---
     LLM_MODEL_NAME: str = "gemini-2.5-flash"
@@ -114,6 +116,9 @@ class Settings:
     ALLOWED_EXTENSIONS: frozenset = field(
         default_factory=lambda: frozenset({".pdf"})
     )
+
+    # --- Auth Settings ---
+    JWT_EXPIRY_HOURS: int = 24
 
     # --- Directory Paths ---
     BASE_DIR: Path = BASE_DIR
@@ -144,6 +149,8 @@ def _load_settings() -> Settings:
     """
     # --- Read required variables ---
     google_api_key = os.getenv("GOOGLE_API_KEY")
+    mongodb_uri = os.getenv("MONGODB_URI")
+    jwt_secret_key = os.getenv("JWT_SECRET_KEY")
 
     if not google_api_key or google_api_key == "your_google_api_key_here":
         print(
@@ -153,6 +160,29 @@ def _load_settings() -> Settings:
             "  1. Copy .env.example to .env:  cp .env.example .env\n"
             "  2. Open .env and paste your real Google API key.\n"
             "  3. Get a free key at: https://aistudio.google.com/apikey\n"
+        )
+        sys.exit(1)
+
+    if not mongodb_uri or mongodb_uri in (
+        "your_mongodb_uri_here",
+        "mongodb+srv://your_username:your_password@your_cluster.mongodb.net/pdf_chatbot?retryWrites=true&w=majority",
+    ):
+        print(
+            "\n❌ ERROR: MONGODB_URI is not set or still has the placeholder value.\n"
+            "\n"
+            "To fix this:\n"
+            "  For local MongoDB: MONGODB_URI=mongodb://localhost:27017/your_db_name\n"
+            "  For Atlas:         MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/db_name\n"
+        )
+        sys.exit(1)
+
+    if not jwt_secret_key or jwt_secret_key == "your_jwt_secret_key_here":
+        print(
+            "\n❌ ERROR: JWT_SECRET_KEY is not set or still has the placeholder value.\n"
+            "\n"
+            "To fix this:\n"
+            "  Generate a secret key: python -c \"import secrets; print(secrets.token_hex(32))\"\n"
+            "  Set JWT_SECRET_KEY in your .env file.\n"
         )
         sys.exit(1)
 
@@ -168,6 +198,7 @@ def _load_settings() -> Settings:
     chunk_overlap = int(os.getenv("CHUNK_OVERLAP", "200"))
     top_k = int(os.getenv("TOP_K", "4"))
     max_file_size_mb = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
+    jwt_expiry_hours = int(os.getenv("JWT_EXPIRY_HOURS", "24"))
 
     # --- Validate logical constraints ---
     if chunk_overlap >= chunk_size:
@@ -198,6 +229,8 @@ def _load_settings() -> Settings:
 
     return Settings(
         GOOGLE_API_KEY=google_api_key,
+        MONGODB_URI=mongodb_uri,
+        JWT_SECRET_KEY=jwt_secret_key,
         LLM_MODEL_NAME=llm_model_name,
         LLM_TEMPERATURE=llm_temperature,
         EMBEDDING_MODEL_NAME=embedding_model_name,
@@ -205,6 +238,7 @@ def _load_settings() -> Settings:
         CHUNK_OVERLAP=chunk_overlap,
         TOP_K=top_k,
         MAX_FILE_SIZE_MB=max_file_size_mb,
+        JWT_EXPIRY_HOURS=jwt_expiry_hours,
     )
 
 

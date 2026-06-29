@@ -1,11 +1,48 @@
 import axios from "axios";
 
-const API_BASE_URL = "http://localhost:5000/api";
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 120000, // 2 min timeout for large PDF processing
 });
+
+// ----------------------------------------------------------------
+// Auth API
+// ----------------------------------------------------------------
+
+/**
+ * Register a new user.
+ * @param {string} name
+ * @param {string} email
+ * @param {string} password
+ */
+export const signupUser = async (name, email, password) => {
+  const response = await api.post("/auth/signup", { name, email, password });
+  return response.data;
+};
+
+/**
+ * Login an existing user.
+ * @param {string} email
+ * @param {string} password
+ */
+export const loginUser = async (email, password) => {
+  const response = await api.post("/auth/login", { email, password });
+  return response.data;
+};
+
+/**
+ * Get the current user's profile.
+ */
+export const getProfile = async () => {
+  const response = await api.get("/auth/me");
+  return response.data;
+};
+
+// ----------------------------------------------------------------
+// App API (all require JWT — handled by AuthContext interceptor)
+// ----------------------------------------------------------------
 
 /**
  * Check backend status and whether a PDF is loaded.
@@ -52,6 +89,19 @@ export const askQuestion = async (question) => {
  */
 export const resetChat = async () => {
   const response = await api.delete("/reset");
+  return response.data;
+};
+
+/**
+ * Get chat history for the current user.
+ * @param {string} [pdfId] - Optional PDF ID filter
+ * @param {number} [limit=50] - Max results
+ */
+export const getHistory = async (pdfId, limit = 50) => {
+  const params = { limit };
+  if (pdfId) params.pdf_id = pdfId;
+
+  const response = await api.get("/history", { params });
   return response.data;
 };
 

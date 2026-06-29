@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect } from "react";
+import { AuthProvider, useAuth } from "./context/AuthContext";
+import AuthPage from "./components/AuthPage";
 import Sidebar from "./components/Sidebar";
 import FileUpload from "./components/FileUpload";
 import ChatMessage from "./components/ChatMessage";
@@ -9,7 +11,8 @@ import "./App.css";
 let messageIdCounter = 0;
 const nextId = () => ++messageIdCounter;
 
-export default function App() {
+function ChatApp() {
+  const { user, logout } = useAuth();
   const [messages, setMessages] = useState([]);
   const [pdfInfo, setPdfInfo] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -96,6 +99,8 @@ export default function App() {
         pdfInfo={pdfInfo}
         onReset={handleReset}
         isUploading={isUploading}
+        user={user}
+        onLogout={logout}
       />
 
       <main className="main-content">
@@ -159,4 +164,27 @@ export default function App() {
       </main>
     </div>
   );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppRouter />
+    </AuthProvider>
+  );
+}
+
+function AppRouter() {
+  const { isAuthenticated, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="auth-loading">
+        <div className="auth-loading-spinner"></div>
+        <p>Loading...</p>
+      </div>
+    );
+  }
+
+  return isAuthenticated ? <ChatApp /> : <AuthPage />;
 }

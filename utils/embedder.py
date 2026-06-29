@@ -29,7 +29,9 @@ Usage:
 from typing import List, Optional
 
 from langchain_core.documents import Document
+# pyrefly: ignore [missing-import]
 from langchain_huggingface import HuggingFaceEmbeddings
+# pyrefly: ignore [missing-import]
 from langchain_community.vectorstores import FAISS
 
 from config import settings

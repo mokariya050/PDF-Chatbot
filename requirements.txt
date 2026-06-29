@@ -71,3 +71,26 @@ pytest>=8.0.0
 
 # pytest-cov: Code coverage plugin for pytest.
 pytest-cov>=5.0.0
+
+# -----------------------------------------------------------
+# Database & Authentication
+# -----------------------------------------------------------
+# pymongo: Official MongoDB driver for Python.
+#   - [srv] extra enables mongodb+srv:// connection strings (Atlas).
+pymongo[srv]>=4.6.0
+
+# bcrypt: Industry-standard password hashing library.
+#   - Used for securely hashing and verifying user passwords.
+bcrypt>=4.0.0
+
+# PyJWT: JSON Web Token implementation for Python.
+#   - Used for generating and verifying JWT auth tokens.
+PyJWT>=2.8.0
+
+# -----------------------------------------------------------
+# Production Server
+# -----------------------------------------------------------
+# gunicorn: Production WSGI server for Flask.
+#   - Required for deploying on Render, Railway, etc.
+#   - Flask's built-in server is for development only.
+gunicorn>=22.0.0

@@ -1,4 +1,4 @@
-export default function Sidebar({ pdfInfo, onReset, isUploading }) {
+export default function Sidebar({ pdfInfo, onReset, isUploading, user, onLogout }) {
   return (
     <aside className="sidebar" id="sidebar">
       <div className="sidebar-header">
@@ -20,6 +20,19 @@ export default function Sidebar({ pdfInfo, onReset, isUploading }) {
       </div>
 
       <div className="sidebar-content">
+        {/* User Profile Card */}
+        {user && (
+          <div className="user-profile-card" id="user-profile-card">
+            <div className="user-avatar">
+              {user.name ? user.name.charAt(0).toUpperCase() : "U"}
+            </div>
+            <div className="user-info">
+              <p className="user-name">{user.name}</p>
+              <p className="user-email">{user.email}</p>
+            </div>
+          </div>
+        )}
+
         {pdfInfo ? (
           <div className="pdf-info-card">
             <div className="pdf-info-header">
@@ -92,6 +105,20 @@ export default function Sidebar({ pdfInfo, onReset, isUploading }) {
               <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
             </svg>
             Reset & Upload New PDF
+          </button>
+        )}
+        {user && (
+          <button
+            className="logout-button"
+            onClick={onLogout}
+            id="logout-button"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16,17 21,12 16,7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+            Sign Out
           </button>
         )}
         <div className="powered-by">

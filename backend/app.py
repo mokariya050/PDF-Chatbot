@@ -5,10 +5,17 @@ Flask Backend Application
 REST API server for the AI PDF Chatbot.
 
 Endpoints:
-    POST   /api/upload  — Upload a PDF file, process and embed it
-    POST   /api/chat    — Ask a question about the uploaded PDF
-    GET    /api/status  — Health check + PDF loaded status
-    DELETE /api/reset   — Clear uploaded PDF and vector store
+    Auth:
+        POST   /api/auth/signup  — Register a new user
+        POST   /api/auth/login   — Login and get JWT token
+        GET    /api/auth/me      — Get current user profile
+
+    App (all require JWT):
+        POST   /api/upload   — Upload a PDF file, process and embed it
+        POST   /api/chat     — Ask a question about the uploaded PDF
+        GET    /api/status   — Health check + PDF loaded status
+        GET    /api/history  — Get chat history for current user
+        DELETE /api/reset    — Clear uploaded PDF and vector store
 
 Usage:
     python backend/app.py
@@ -26,6 +33,9 @@ from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
 from config import settings
+from backend.database import init_db, get_db
+from backend.auth import auth_bp, jwt_required, get_current_user_id
+from backend.models import PDFModel, ChatModel
 from utils.logger import get_logger
 from utils.pdf_loader import load_pdf
 from utils.text_chunker import chunk_documents
@@ -40,14 +50,13 @@ logger = get_logger(__name__)
 app = Flask(__name__)
 CORS(app)  # Allow cross-origin requests from Vite dev server
 
-# In-memory state tracking
-app_state = {
-    "pdf_loaded": False,
-    "pdf_name": None,
-    "num_pages": 0,
-    "num_chunks": 0,
-    "vector_store": None,
-}
+# Register authentication blueprint
+app.register_blueprint(auth_bp)
+
+# In-memory cache for vector stores (keyed by user_id)
+# The vector store is an in-memory FAISS index, not suitable for MongoDB.
+# We cache it here and persist to disk via FAISS save/load.
+_vector_stores = {}
 
 
 # ----------------------------------------------------------------
@@ -67,23 +76,43 @@ def _file_size_ok(file) -> bool:
     return size_mb <= settings.MAX_FILE_SIZE_MB
 
 
+def _get_file_size_mb(file) -> float:
+    """Get file size in MB without consuming the stream."""
+    file.seek(0, os.SEEK_END)
+    size_mb = file.tell() / (1024 * 1024)
+    file.seek(0)
+    return size_mb
+
+
+def _get_user_vectorstore_dir(user_id: str) -> str:
+    """Get the vector store directory path for a specific user."""
+    user_dir = settings.VECTORSTORE_DIR / user_id
+    user_dir.mkdir(parents=True, exist_ok=True)
+    return str(user_dir)
+
+
 # ----------------------------------------------------------------
 # Routes
 # ----------------------------------------------------------------
 
 @app.route("/api/status", methods=["GET"])
+@jwt_required
 def status():
-    """Health check and current PDF status."""
+    """Health check and current PDF status for authenticated user."""
+    user_id = get_current_user_id()
+    active_pdf = PDFModel.get_active_pdf(user_id)
+
     return jsonify({
         "status": "ok",
-        "pdf_loaded": app_state["pdf_loaded"],
-        "pdf_name": app_state["pdf_name"],
-        "num_pages": app_state["num_pages"],
-        "num_chunks": app_state["num_chunks"],
+        "pdf_loaded": active_pdf is not None,
+        "pdf_name": active_pdf["filename"] if active_pdf else None,
+        "num_pages": active_pdf["num_pages"] if active_pdf else 0,
+        "num_chunks": active_pdf["num_chunks"] if active_pdf else 0,
     })
 
 
 @app.route("/api/upload", methods=["POST"])
+@jwt_required
 def upload_pdf():
     """
     Upload and process a PDF file.
@@ -94,10 +123,13 @@ def upload_pdf():
         3. Extract text with PyPDFLoader.
         4. Chunk the text.
         5. Create embeddings and FAISS vector store.
+        6. Save PDF metadata to MongoDB.
 
     Returns:
         JSON with processing results or error message.
     """
+    user_id = get_current_user_id()
+
     # Check if file is in the request
     if "file" not in request.files:
         return jsonify({"error": "No file provided"}), 400
@@ -120,6 +152,9 @@ def upload_pdf():
         }), 400
 
     try:
+        # Get file size before saving
+        file_size_mb = _get_file_size_mb(file)
+
         # Save the file
         filename = secure_filename(file.filename)
         filepath = os.path.join(str(settings.UPLOAD_DIR), filename)
@@ -132,19 +167,30 @@ def upload_pdf():
         # Step 2: Chunk text
         chunks = chunk_documents(documents)
 
-        # Step 3: Create vector store
+        # Step 3: Create vector store (user-specific directory)
+        vector_store_dir = _get_user_vectorstore_dir(user_id)
         vector_store = create_vector_store(chunks)
 
-        # Update app state
-        app_state["pdf_loaded"] = True
-        app_state["pdf_name"] = filename
-        app_state["num_pages"] = len(documents)
-        app_state["num_chunks"] = len(chunks)
-        app_state["vector_store"] = vector_store
+        # Save vector store to user-specific directory
+        vector_store.save_local(vector_store_dir)
+
+        # Cache vector store in memory
+        _vector_stores[user_id] = vector_store
+
+        # Step 4: Save PDF metadata to MongoDB
+        pdf_id = PDFModel.create(
+            user_id=user_id,
+            filename=filename,
+            original_filename=file.filename,
+            num_pages=len(documents),
+            num_chunks=len(chunks),
+            file_size_mb=file_size_mb,
+        )
 
         logger.info(
             f"PDF processed successfully: {filename} "
-            f"({len(documents)} pages, {len(chunks)} chunks)"
+            f"({len(documents)} pages, {len(chunks)} chunks) "
+            f"for user {user_id}"
         )
 
         return jsonify({
@@ -152,6 +198,7 @@ def upload_pdf():
             "filename": filename,
             "num_pages": len(documents),
             "num_chunks": len(chunks),
+            "pdf_id": pdf_id,
         })
 
     except Exception as e:
@@ -160,6 +207,7 @@ def upload_pdf():
 
 
 @app.route("/api/chat", methods=["POST"])
+@jwt_required
 def chat():
     """
     Ask a question about the uploaded PDF.
@@ -169,11 +217,34 @@ def chat():
     Returns:
         JSON with the generated answer.
     """
-    # Check if a PDF is loaded
-    if not app_state["pdf_loaded"] or app_state["vector_store"] is None:
-        return jsonify({
-            "error": "No PDF uploaded yet. Please upload a PDF first."
-        }), 400
+    user_id = get_current_user_id()
+
+    # Get or load vector store for this user
+    vector_store = _vector_stores.get(user_id)
+
+    if vector_store is None:
+        # Try loading from disk
+        vector_store_dir = _get_user_vectorstore_dir(user_id)
+        from langchain_huggingface import HuggingFaceEmbeddings
+        from langchain_community.vectorstores import FAISS
+
+        index_file = os.path.join(vector_store_dir, "index.faiss")
+        if os.path.exists(index_file):
+            embedding_model = HuggingFaceEmbeddings(
+                model_name=settings.EMBEDDING_MODEL_NAME,
+                model_kwargs={"device": "cpu"},
+                encode_kwargs={"normalize_embeddings": True},
+            )
+            vector_store = FAISS.load_local(
+                vector_store_dir,
+                embedding_model,
+                allow_dangerous_deserialization=True,
+            )
+            _vector_stores[user_id] = vector_store
+        else:
+            return jsonify({
+                "error": "No PDF uploaded yet. Please upload a PDF first."
+            }), 400
 
     # Get question from request body
     data = request.get_json()
@@ -185,12 +256,23 @@ def chat():
         return jsonify({"error": "Question cannot be empty"}), 400
 
     try:
-        answer = get_answer(app_state["vector_store"], question)
+        answer = get_answer(vector_store, question)
+
+        # Save to chat history in MongoDB
+        active_pdf = PDFModel.get_active_pdf(user_id)
+        pdf_id = str(active_pdf["_id"]) if active_pdf else "unknown"
+
+        ChatModel.create(
+            user_id=user_id,
+            pdf_id=pdf_id,
+            question=question,
+            answer=answer,
+        )
 
         return jsonify({
             "answer": answer,
             "question": question,
-            "pdf_name": app_state["pdf_name"],
+            "pdf_name": active_pdf["filename"] if active_pdf else None,
         })
 
     except Exception as e:
@@ -198,14 +280,50 @@ def chat():
         return jsonify({"error": f"Failed to generate answer: {str(e)}"}), 500
 
 
+@app.route("/api/history", methods=["GET"])
+@jwt_required
+def get_history():
+    """
+    Get chat history for the current user.
+
+    Query params:
+        pdf_id (optional): Filter by specific PDF document.
+        limit (optional): Max number of results (default 50).
+
+    Returns:
+        JSON with list of chat Q&A pairs.
+    """
+    user_id = get_current_user_id()
+    pdf_id = request.args.get("pdf_id")
+    limit = int(request.args.get("limit", "50"))
+
+    history = ChatModel.get_user_history(user_id, limit=limit, pdf_id=pdf_id)
+
+    # Convert ObjectIds to strings for JSON serialization
+    result = []
+    for chat in history:
+        result.append({
+            "id": str(chat["_id"]),
+            "question": chat["question"],
+            "answer": chat["answer"],
+            "pdf_id": chat.get("pdf_id"),
+            "created_at": chat["created_at"].isoformat(),
+        })
+
+    return jsonify({"history": result})
+
+
 @app.route("/api/reset", methods=["DELETE"])
+@jwt_required
 def reset():
     """
-    Clear the uploaded PDF and vector store.
+    Clear the uploaded PDF and vector store for the current user.
 
     Removes uploaded files and FAISS index from disk,
-    resets the in-memory state.
+    resets the in-memory state, and deactivates PDFs in MongoDB.
     """
+    user_id = get_current_user_id()
+
     try:
         # Clear uploads directory
         for f in settings.UPLOAD_DIR.iterdir():
@@ -215,22 +333,18 @@ def reset():
                 elif f.is_dir():
                     shutil.rmtree(f)
 
-        # Clear vector store directory
-        for f in settings.VECTORSTORE_DIR.iterdir():
-            if f.name != ".gitkeep":
-                if f.is_file():
-                    f.unlink()
-                elif f.is_dir():
-                    shutil.rmtree(f)
+        # Clear user's vector store directory
+        user_vs_dir = settings.VECTORSTORE_DIR / user_id
+        if user_vs_dir.exists():
+            shutil.rmtree(user_vs_dir)
 
-        # Reset state
-        app_state["pdf_loaded"] = False
-        app_state["pdf_name"] = None
-        app_state["num_pages"] = 0
-        app_state["num_chunks"] = 0
-        app_state["vector_store"] = None
+        # Remove from memory cache
+        _vector_stores.pop(user_id, None)
 
-        logger.info("Application state reset successfully")
+        # Deactivate PDFs in MongoDB
+        PDFModel.deactivate_all(user_id)
+
+        logger.info(f"Application state reset for user {user_id}")
         return jsonify({"message": "Reset successful. Upload a new PDF to start."})
 
     except Exception as e:
@@ -241,6 +355,9 @@ def reset():
 # ----------------------------------------------------------------
 # Startup
 # ----------------------------------------------------------------
+# Initialize MongoDB on import so gunicorn workers also connect
+init_db()
+
 if __name__ == "__main__":
     print("=" * 60)
     print("  AI PDF Chatbot - Flask Backend")
@@ -250,20 +367,15 @@ if __name__ == "__main__":
     print(f"  Chunk Size:   {settings.CHUNK_SIZE}")
     print(f"  Top-K:        {settings.TOP_K}")
     print(f"  Upload Dir:   {settings.UPLOAD_DIR}")
+    print(f"  MongoDB:      Connected ✅")
     print("=" * 60)
 
-    # Try to load existing vector store on startup
-    existing_store = load_vector_store()
-    if existing_store:
-        app_state["vector_store"] = existing_store
-        app_state["pdf_loaded"] = True
-        app_state["pdf_name"] = "(previously loaded)"
-        print("  [OK] Loaded existing vector store from disk")
-
-    print("\n  Starting server on http://localhost:5000\n")
+    port = int(os.environ.get("PORT", 5000))
+    print(f"\n  Starting server on http://localhost:{port}\n")
 
     app.run(
         host="0.0.0.0",
-        port=5000,
-        debug=True,
+        port=port,
+        debug=os.environ.get("FLASK_DEBUG", "false").lower() == "true",
     )
+
