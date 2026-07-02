@@ -247,15 +247,14 @@ def chat():
     if vector_store is None:
         # Try loading from disk
         vector_store_dir = _get_user_vectorstore_dir(user_id)
-        from langchain_huggingface import HuggingFaceEmbeddings
+        from langchain_google_genai import GoogleGenerativeAIEmbeddings
         from langchain_community.vectorstores import FAISS
 
         index_file = os.path.join(vector_store_dir, "index.faiss")
         if os.path.exists(index_file):
-            embedding_model = HuggingFaceEmbeddings(
-                model_name=settings.EMBEDDING_MODEL_NAME,
-                model_kwargs={"device": "cpu"},
-                encode_kwargs={"normalize_embeddings": True},
+            embedding_model = GoogleGenerativeAIEmbeddings(
+                model=settings.EMBEDDING_MODEL_NAME,
+                google_api_key=settings.GOOGLE_API_KEY,
             )
             vector_store = FAISS.load_local(
                 vector_store_dir,

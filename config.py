@@ -105,7 +105,7 @@ class Settings:
     LLM_TEMPERATURE: float = 0.2
 
     # --- Embedding Settings ---
-    EMBEDDING_MODEL_NAME: str = "sentence-transformers/all-MiniLM-L6-v2"
+    EMBEDDING_MODEL_NAME: str = "models/text-embedding-004"
 
     # --- Chunking Settings ---
     CHUNK_SIZE: int = 1000
@@ -196,7 +196,7 @@ def _load_settings() -> Settings:
     llm_model_name = os.getenv("LLM_MODEL_NAME", "gemini-2.5-flash")
     llm_temperature = float(os.getenv("LLM_TEMPERATURE", "0.2"))
     embedding_model_name = os.getenv(
-        "EMBEDDING_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2"
+        "EMBEDDING_MODEL_NAME", "models/text-embedding-004"
     )
     chunk_size = int(os.getenv("CHUNK_SIZE", "1000"))
     chunk_overlap = int(os.getenv("CHUNK_OVERLAP", "200"))

@@ -30,7 +30,7 @@ from typing import List, Optional
 
 from langchain_core.documents import Document
 # pyrefly: ignore [missing-import]
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 # pyrefly: ignore [missing-import]
 from langchain_community.vectorstores import FAISS
 
@@ -40,30 +40,26 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 # Module-level cache for the embedding model.
-# Loading the model takes ~2-5 seconds, so we cache it after first use.
-_embedding_model: Optional[HuggingFaceEmbeddings] = None
+# Loading the model is very fast now since it's an API.
+_embedding_model: Optional[GoogleGenerativeAIEmbeddings] = None
 
 
-def _get_embedding_model() -> HuggingFaceEmbeddings:
+def _get_embedding_model() -> GoogleGenerativeAIEmbeddings:
     """
-    Get or create the HuggingFace embedding model (cached singleton).
-
-    The model is downloaded on first use (~90 MB) and cached locally
-    by HuggingFace's transformers library.
+    Get or create the Google GenAI embedding model (cached singleton).
 
     Returns:
-        HuggingFaceEmbeddings: Configured embedding model instance.
+        GoogleGenerativeAIEmbeddings: Configured embedding model instance.
     """
     global _embedding_model
 
     if _embedding_model is None:
-        logger.info(f"Loading embedding model: {settings.EMBEDDING_MODEL_NAME}")
-        _embedding_model = HuggingFaceEmbeddings(
-            model_name=settings.EMBEDDING_MODEL_NAME,
-            model_kwargs={"device": "cpu"},
-            encode_kwargs={"normalize_embeddings": True},
+        logger.info(f"Loading Google GenAI embedding model: {settings.EMBEDDING_MODEL_NAME}")
+        _embedding_model = GoogleGenerativeAIEmbeddings(
+            model=settings.EMBEDDING_MODEL_NAME,
+            google_api_key=settings.GOOGLE_API_KEY,
         )
-        logger.info("Embedding model loaded successfully")
+        logger.info("Google GenAI embedding model loaded successfully")
 
     return _embedding_model
 

@@ -20,10 +20,6 @@ langchain-community>=0.3.0
 #   - Provides ChatGoogleGenerativeAI for Gemini API access.
 langchain-google-genai>=2.0.0
 
-# langchain-huggingface: Official HuggingFace integration.
-#   - Provides HuggingFaceEmbeddings for local embedding models.
-langchain-huggingface>=0.1.0
-
 # -----------------------------------------------------------
 # Vector Database
 # -----------------------------------------------------------
@@ -38,13 +34,6 @@ faiss-cpu>=1.7.0
 # pypdf: PDF text extraction library.
 #   - Used by LangChain's PyPDFLoader under the hood.
 pypdf>=4.0.0
-
-# -----------------------------------------------------------
-# Embeddings Model
-# -----------------------------------------------------------
-# sentence-transformers: HuggingFace sentence embedding models.
-#   - Downloads and runs models locally (no API key needed).
-sentence-transformers>=3.0.0
 
 # -----------------------------------------------------------
 # Web Framework
