@@ -94,8 +94,11 @@ class Settings:
 
     # --- Required Settings (no defaults) ---
     GOOGLE_API_KEY: str
-    MONGODB_URI: str
+    DATABASE_URL: str
     JWT_SECRET_KEY: str
+
+    # --- Frontend URL (for CORS) ---
+    FRONTEND_URL: str = ""
 
     # --- LLM Settings ---
     LLM_MODEL_NAME: str = "gemini-2.5-flash"
@@ -149,7 +152,7 @@ def _load_settings() -> Settings:
     """
     # --- Read required variables ---
     google_api_key = os.getenv("GOOGLE_API_KEY")
-    mongodb_uri = os.getenv("MONGODB_URI")
+    database_url = os.getenv("DATABASE_URL")
     jwt_secret_key = os.getenv("JWT_SECRET_KEY")
 
     if not google_api_key or google_api_key == "your_google_api_key_here":
@@ -163,16 +166,16 @@ def _load_settings() -> Settings:
         )
         sys.exit(1)
 
-    if not mongodb_uri or mongodb_uri in (
-        "your_mongodb_uri_here",
-        "mongodb+srv://your_username:your_password@your_cluster.mongodb.net/pdf_chatbot?retryWrites=true&w=majority",
+    if not database_url or database_url in (
+        "your_database_url_here",
+        "postgresql://postgres:password@localhost:5432/pdf_chatbot",
     ):
         print(
-            "\n❌ ERROR: MONGODB_URI is not set or still has the placeholder value.\n"
+            "\n❌ ERROR: DATABASE_URL is not set or still has the placeholder value.\n"
             "\n"
             "To fix this:\n"
-            "  For local MongoDB: MONGODB_URI=mongodb://localhost:27017/your_db_name\n"
-            "  For Atlas:         MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/db_name\n"
+            "  For Supabase: DATABASE_URL=postgresql://postgres.[ref]:[password]@aws-0-[region].pooler.supabase.com:6543/postgres\n"
+            "  For local:    DATABASE_URL=postgresql://postgres:password@localhost:5432/pdf_chatbot\n"
         )
         sys.exit(1)
 
@@ -181,7 +184,7 @@ def _load_settings() -> Settings:
             "\n❌ ERROR: JWT_SECRET_KEY is not set or still has the placeholder value.\n"
             "\n"
             "To fix this:\n"
-            "  Generate a secret key: python -c \"import secrets; print(secrets.token_hex(32))\"\n"
+            '  Generate a secret key: python -c "import secrets; print(secrets.token_hex(32))"\n'
             "  Set JWT_SECRET_KEY in your .env file.\n"
         )
         sys.exit(1)
@@ -189,6 +192,7 @@ def _load_settings() -> Settings:
     # --- Read optional variables with type conversion ---
     # os.getenv() always returns strings, so we convert to the right type.
     # The pattern: type(os.getenv("KEY", "default_as_string"))
+    frontend_url = os.getenv("FRONTEND_URL", "")
     llm_model_name = os.getenv("LLM_MODEL_NAME", "gemini-2.5-flash")
     llm_temperature = float(os.getenv("LLM_TEMPERATURE", "0.2"))
     embedding_model_name = os.getenv(
@@ -229,8 +233,9 @@ def _load_settings() -> Settings:
 
     return Settings(
         GOOGLE_API_KEY=google_api_key,
-        MONGODB_URI=mongodb_uri,
+        DATABASE_URL=database_url,
         JWT_SECRET_KEY=jwt_secret_key,
+        FRONTEND_URL=frontend_url,
         LLM_MODEL_NAME=llm_model_name,
         LLM_TEMPERATURE=llm_temperature,
         EMBEDDING_MODEL_NAME=embedding_model_name,
@@ -266,6 +271,8 @@ if __name__ == "__main__":
     print(f"  Chunk Overlap:  {settings.CHUNK_OVERLAP}")
     print(f"  Top-K:          {settings.TOP_K}")
     print(f"  Max File Size:  {settings.MAX_FILE_SIZE_MB} MB")
+    print(f"  Database:       PostgreSQL (Supabase)")
+    print(f"  Frontend URL:   {settings.FRONTEND_URL or '(not set)'}")
     print(f"  Base Dir:       {settings.BASE_DIR}")
     print(f"  Upload Dir:     {settings.UPLOAD_DIR}")
     print(f"  Vectorstore:    {settings.VECTORSTORE_DIR}")

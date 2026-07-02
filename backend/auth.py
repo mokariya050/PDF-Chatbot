@@ -34,7 +34,7 @@ from functools import wraps
 
 import jwt
 from flask import Blueprint, request, jsonify, g
-from pymongo.errors import DuplicateKeyError
+import psycopg2.errors
 
 # Add parent directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -62,7 +62,7 @@ def _generate_token(user_id: str) -> str:
         - exp: expiration timestamp
 
     Args:
-        user_id: The user's MongoDB ObjectId as a string.
+        user_id: The user's ID as a string.
 
     Returns:
         str: Encoded JWT token.
@@ -133,7 +133,7 @@ def get_current_user_id() -> str:
     Must be called inside a @jwt_required decorated route.
 
     Returns:
-        str: The current user's MongoDB ObjectId as a string.
+        str: The current user's ID as a string.
     """
     return g.current_user_id
 
@@ -191,7 +191,7 @@ def signup():
             },
         }), 201
 
-    except DuplicateKeyError:
+    except psycopg2.errors.UniqueViolation:
         return jsonify({"error": "An account with this email already exists"}), 409
 
     except Exception as e:
@@ -234,7 +234,7 @@ def login():
     if not UserModel.verify_password(password, user["password"]):
         return jsonify({"error": "Invalid email or password"}), 401
 
-    user_id = str(user["_id"])
+    user_id = str(user["id"])
     token = _generate_token(user_id)
 
     logger.info(f"User logged in: {email}")
@@ -269,7 +269,7 @@ def get_profile():
 
     return jsonify({
         "user": {
-            "id": str(user["_id"]),
+            "id": str(user["id"]),
             "name": user["name"],
             "email": user["email"],
             "created_at": user["created_at"].isoformat(),

@@ -2,11 +2,11 @@
 Database Module
 ===============
 
-MongoDB connection setup using pymongo.
+PostgreSQL (Supabase) connection setup using psycopg2.
 
-This module provides a singleton-style database connection that is
-initialized once and reused across the application. Uses connection
-pooling internally (pymongo's default behavior).
+This module provides a connection pool that is initialized once
+and reused across the application. Uses psycopg2's built-in
+connection pooling for efficient database access.
 
 Usage:
     from backend.database import get_db, init_db
@@ -14,16 +14,18 @@ Usage:
     # Initialize on app startup
     init_db()
 
-    # Get database reference anywhere
-    db = get_db()
-    db.users.find_one({"email": "user@example.com"})
+    # Get database connection anywhere
+    conn = get_db()
+    with conn.cursor() as cur:
+        cur.execute("SELECT * FROM users WHERE email = %s", (email,))
+        user = cur.fetchone()
 """
-
-from pymongo import MongoClient
-from pymongo.errors import ConnectionFailure
 
 import os
 import sys
+
+import psycopg2
+from psycopg2 import pool, extras
 
 # Add parent directory to path so we can import config
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -33,105 +35,157 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Module-level references (singleton pattern)
-_client: MongoClient = None
-_db = None
+# Module-level connection pool (singleton pattern)
+_pool: pool.SimpleConnectionPool = None
 
 
 def init_db():
     """
-    Initialize the MongoDB connection.
+    Initialize the PostgreSQL connection pool and create tables.
 
-    Call this once during application startup. Creates a MongoClient
-    with connection pooling and verifies connectivity with a ping.
+    Call this once during application startup. Creates a connection
+    pool with min 1 and max 20 connections, then ensures all required
+    tables exist.
 
     Raises:
         SystemExit: If the database connection fails.
     """
-    global _client, _db
+    global _pool
 
-    if _client is not None:
+    if _pool is not None:
         logger.info("Database already initialized, skipping")
         return
 
     try:
-        logger.info("Connecting to MongoDB...")
+        logger.info("Connecting to PostgreSQL (Supabase)...")
 
-        _client = MongoClient(
-            settings.MONGODB_URI,
-            serverSelectionTimeoutMS=5000,  # 5 second timeout
-            maxPoolSize=50,
+        _pool = pool.SimpleConnectionPool(
+            minconn=1,
+            maxconn=20,
+            dsn=settings.DATABASE_URL,
         )
 
         # Verify the connection works
-        _client.admin.command("ping")
+        conn = _pool.getconn()
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
+        _pool.putconn(conn)
 
-        # Extract database name from URI, default to "pdf_chatbot"
-        db_name = settings.MONGODB_URI.split("/")[-1].split("?")[0]
-        if not db_name:
-            db_name = "pdf_chatbot"
+        # Create tables if they don't exist
+        _create_tables()
 
-        _db = _client[db_name]
+        logger.info("✅ Connected to PostgreSQL (Supabase)")
 
-        # Create indexes for efficient queries
-        _ensure_indexes()
-
-        logger.info(f"✅ Connected to MongoDB database: {db_name}")
-
-    except ConnectionFailure as e:
-        logger.error(f"❌ MongoDB connection failed: {e}")
+    except psycopg2.OperationalError as e:
+        logger.error(f"❌ PostgreSQL connection failed: {e}")
         print(
-            "\n❌ ERROR: Could not connect to MongoDB.\n"
+            "\n❌ ERROR: Could not connect to PostgreSQL (Supabase).\n"
             "\n"
-            "Check your MONGODB_URI in .env:\n"
-            f"  Current URI starts with: {settings.MONGODB_URI[:30]}...\n"
+            "Check your DATABASE_URL in .env:\n"
+            f"  Current URI starts with: {settings.DATABASE_URL[:40]}...\n"
             "\n"
             "Common fixes:\n"
-            "  1. Verify your MongoDB Atlas credentials\n"
-            "  2. Whitelist your IP address in Atlas Network Access\n"
-            "  3. Check if the cluster is running\n"
+            "  1. Verify your Supabase database password\n"
+            "  2. Check if the Supabase project is running\n"
+            "  3. Ensure the connection string is correct\n"
+            "     Format: postgresql://postgres.[ref]:[password]@aws-0-[region].pooler.supabase.com:6543/postgres\n"
         )
         sys.exit(1)
 
 
-def _ensure_indexes():
-    """Create database indexes for performance."""
-    # Unique email index on users
-    _db.users.create_index("email", unique=True)
+def _create_tables():
+    """Create database tables if they don't exist."""
+    conn = get_db()
+    conn.autocommit = True
 
-    # Index chat history by user_id and created_at for fast retrieval
-    _db.chat_history.create_index([("user_id", 1), ("created_at", -1)])
+    with conn.cursor() as cur:
+        # Users table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id          SERIAL PRIMARY KEY,
+                name        VARCHAR(255) NOT NULL,
+                email       VARCHAR(255) UNIQUE NOT NULL,
+                password    VARCHAR(255) NOT NULL,
+                created_at  TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            )
+        """)
 
-    # Index pdf_documents by user_id
-    _db.pdf_documents.create_index([("user_id", 1), ("uploaded_at", -1)])
+        # PDF documents table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS pdf_documents (
+                id                  SERIAL PRIMARY KEY,
+                user_id             INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                filename            VARCHAR(255) NOT NULL,
+                original_filename   VARCHAR(255) NOT NULL,
+                num_pages           INTEGER NOT NULL DEFAULT 0,
+                num_chunks          INTEGER NOT NULL DEFAULT 0,
+                file_size_mb        REAL NOT NULL DEFAULT 0,
+                uploaded_at         TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                is_active           BOOLEAN DEFAULT TRUE
+            )
+        """)
 
-    logger.info("Database indexes ensured")
+        # Chat history table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS chat_history (
+                id          SERIAL PRIMARY KEY,
+                user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                pdf_id      INTEGER REFERENCES pdf_documents(id) ON DELETE SET NULL,
+                question    TEXT NOT NULL,
+                answer      TEXT NOT NULL,
+                created_at  TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            )
+        """)
+
+        # Create indexes for performance
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_users_email
+            ON users(email)
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_pdf_documents_user_id
+            ON pdf_documents(user_id, uploaded_at DESC)
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_chat_history_user_id
+            ON chat_history(user_id, created_at DESC)
+        """)
+
+    release_db(conn)
+    logger.info("Database tables and indexes ensured")
 
 
 def get_db():
     """
-    Get the database reference.
+    Get a database connection from the pool.
 
-    Returns the pymongo Database object. Must call init_db() first.
+    Returns a psycopg2 connection object. The caller MUST call
+    release_db(conn) when done to return it to the pool.
 
     Returns:
-        pymongo.database.Database: The MongoDB database instance.
+        psycopg2.connection: A PostgreSQL connection.
 
     Raises:
         RuntimeError: If init_db() hasn't been called yet.
     """
-    if _db is None:
+    if _pool is None:
         raise RuntimeError(
             "Database not initialized. Call init_db() first."
         )
-    return _db
+    return _pool.getconn()
+
+
+def release_db(conn):
+    """Return a connection back to the pool."""
+    if _pool is not None and conn is not None:
+        _pool.putconn(conn)
 
 
 def close_db():
-    """Close the MongoDB connection (for graceful shutdown)."""
-    global _client, _db
-    if _client:
-        _client.close()
-        _client = None
-        _db = None
-        logger.info("MongoDB connection closed")
+    """Close all connections in the pool (for graceful shutdown)."""
+    global _pool
+    if _pool:
+        _pool.closeall()
+        _pool = None
+        logger.info("PostgreSQL connection pool closed")

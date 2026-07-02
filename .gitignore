@@ -11,6 +11,8 @@
 # NEVER commit real API keys or secrets.
 # Use .env.example to show required variables without values.
 .env
+frontend/.env.production
+frontend/.env.local
 
 # -----------------------------------------------------------
 # Python Runtime Files

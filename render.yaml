@@ -1,0 +1,25 @@
+# ============================================================
+# Render Blueprint — One-Click Deploy Configuration
+# ============================================================
+# This file defines the infrastructure for deploying on Render.
+# Use it with: https://render.com/deploy
+# ============================================================
+
+services:
+  - type: web
+    name: pdf-chatbot-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn backend.app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    envVars:
+      - key: GOOGLE_API_KEY
+        sync: false  # User must set this manually
+      - key: DATABASE_URL
+        sync: false  # User must set their Supabase URL
+      - key: JWT_SECRET_KEY
+        generateValue: true  # Render auto-generates a random secret
+      - key: FRONTEND_URL
+        sync: false  # User sets their Vercel URL after deploying frontend
+      - key: PYTHON_VERSION
+        value: 3.12.0

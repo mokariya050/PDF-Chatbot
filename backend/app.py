@@ -48,13 +48,22 @@ logger = get_logger(__name__)
 # Flask App Setup
 # ----------------------------------------------------------------
 app = Flask(__name__)
-CORS(app)  # Allow cross-origin requests from Vite dev server
+
+# Configure CORS — allow frontend origin in production and localhost in dev
+allowed_origins = [
+    "http://localhost:5173",   # Vite dev server
+    "http://localhost:3000",   # Alternative dev port
+]
+if settings.FRONTEND_URL:
+    allowed_origins.append(settings.FRONTEND_URL)
+
+CORS(app, origins=allowed_origins, supports_credentials=True)
 
 # Register authentication blueprint
 app.register_blueprint(auth_bp)
 
 # In-memory cache for vector stores (keyed by user_id)
-# The vector store is an in-memory FAISS index, not suitable for MongoDB.
+# The vector store is an in-memory FAISS index, not suitable for PostgreSQL.
 # We cache it here and persist to disk via FAISS save/load.
 _vector_stores = {}
 
@@ -92,6 +101,19 @@ def _get_user_vectorstore_dir(user_id: str) -> str:
 
 
 # ----------------------------------------------------------------
+# Health Check (for Render)
+# ----------------------------------------------------------------
+@app.route("/", methods=["GET"])
+def health_check():
+    """Root health check endpoint for Render deployment."""
+    return jsonify({
+        "status": "healthy",
+        "service": "PDF ChatBot API",
+        "version": "1.0.0",
+    })
+
+
+# ----------------------------------------------------------------
 # Routes
 # ----------------------------------------------------------------
 
@@ -123,7 +145,7 @@ def upload_pdf():
         3. Extract text with PyPDFLoader.
         4. Chunk the text.
         5. Create embeddings and FAISS vector store.
-        6. Save PDF metadata to MongoDB.
+        6. Save PDF metadata to PostgreSQL.
 
     Returns:
         JSON with processing results or error message.
@@ -177,7 +199,7 @@ def upload_pdf():
         # Cache vector store in memory
         _vector_stores[user_id] = vector_store
 
-        # Step 4: Save PDF metadata to MongoDB
+        # Step 4: Save PDF metadata to PostgreSQL
         pdf_id = PDFModel.create(
             user_id=user_id,
             filename=filename,
@@ -258,9 +280,9 @@ def chat():
     try:
         answer = get_answer(vector_store, question)
 
-        # Save to chat history in MongoDB
+        # Save to chat history in PostgreSQL
         active_pdf = PDFModel.get_active_pdf(user_id)
-        pdf_id = str(active_pdf["_id"]) if active_pdf else "unknown"
+        pdf_id = str(active_pdf["id"]) if active_pdf else None
 
         ChatModel.create(
             user_id=user_id,
@@ -299,14 +321,14 @@ def get_history():
 
     history = ChatModel.get_user_history(user_id, limit=limit, pdf_id=pdf_id)
 
-    # Convert ObjectIds to strings for JSON serialization
+    # Format for JSON response
     result = []
     for chat in history:
         result.append({
-            "id": str(chat["_id"]),
+            "id": str(chat["id"]),
             "question": chat["question"],
             "answer": chat["answer"],
-            "pdf_id": chat.get("pdf_id"),
+            "pdf_id": str(chat["pdf_id"]) if chat.get("pdf_id") else None,
             "created_at": chat["created_at"].isoformat(),
         })
 
@@ -320,7 +342,7 @@ def reset():
     Clear the uploaded PDF and vector store for the current user.
 
     Removes uploaded files and FAISS index from disk,
-    resets the in-memory state, and deactivates PDFs in MongoDB.
+    resets the in-memory state, and deactivates PDFs in PostgreSQL.
     """
     user_id = get_current_user_id()
 
@@ -341,7 +363,7 @@ def reset():
         # Remove from memory cache
         _vector_stores.pop(user_id, None)
 
-        # Deactivate PDFs in MongoDB
+        # Deactivate PDFs in PostgreSQL
         PDFModel.deactivate_all(user_id)
 
         logger.info(f"Application state reset for user {user_id}")
@@ -355,7 +377,7 @@ def reset():
 # ----------------------------------------------------------------
 # Startup
 # ----------------------------------------------------------------
-# Initialize MongoDB on import so gunicorn workers also connect
+# Initialize PostgreSQL on import so gunicorn workers also connect
 init_db()
 
 if __name__ == "__main__":
@@ -367,7 +389,7 @@ if __name__ == "__main__":
     print(f"  Chunk Size:   {settings.CHUNK_SIZE}")
     print(f"  Top-K:        {settings.TOP_K}")
     print(f"  Upload Dir:   {settings.UPLOAD_DIR}")
-    print(f"  MongoDB:      Connected ✅")
+    print(f"  Database:     PostgreSQL (Supabase) ✅")
     print("=" * 60)
 
     port = int(os.environ.get("PORT", 5000))
@@ -378,4 +400,3 @@ if __name__ == "__main__":
         port=port,
         debug=os.environ.get("FLASK_DEBUG", "false").lower() == "true",
     )
-

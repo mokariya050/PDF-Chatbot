@@ -2,11 +2,11 @@
 Data Models Module
 ==================
 
-MongoDB data access layer for users, PDFs, and chat history.
+PostgreSQL data access layer for users, PDFs, and chat history.
 
 Each "Model" class provides static methods for CRUD operations
-on its corresponding MongoDB collection. No ORM is needed —
-pymongo works directly with dictionaries.
+on its corresponding PostgreSQL table. Uses parameterized queries
+to prevent SQL injection.
 
 Usage:
     from backend.models import UserModel, PDFModel, ChatModel
@@ -25,18 +25,15 @@ from datetime import datetime, timezone
 from typing import Optional, List, Dict
 
 import bcrypt
-from bson import ObjectId
 
-from backend.database import get_db
+from backend.database import get_db, release_db
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
 class UserModel:
-    """CRUD operations for the 'users' collection."""
-
-    COLLECTION = "users"
+    """CRUD operations for the 'users' table."""
 
     @staticmethod
     def create(name: str, email: str, password: str) -> str:
@@ -52,9 +49,9 @@ class UserModel:
             str: The inserted user's ID as a string.
 
         Raises:
-            pymongo.errors.DuplicateKeyError: If email already exists.
+            psycopg2.errors.UniqueViolation: If email already exists.
         """
-        db = get_db()
+        conn = get_db()
 
         # Hash the password with bcrypt
         password_hash = bcrypt.hashpw(
@@ -62,35 +59,75 @@ class UserModel:
             bcrypt.gensalt(rounds=12),
         ).decode("utf-8")
 
-        user_doc = {
-            "name": name,
-            "email": email.lower().strip(),
-            "password": password_hash,
-            "created_at": datetime.now(timezone.utc),
-        }
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO users (name, email, password)
+                    VALUES (%s, %s, %s)
+                    RETURNING id
+                    """,
+                    (name, email.lower().strip(), password_hash),
+                )
+                user_id = cur.fetchone()[0]
+                conn.commit()
 
-        result = db[UserModel.COLLECTION].insert_one(user_doc)
-        logger.info(f"User created: {email}")
-        return str(result.inserted_id)
+            logger.info(f"User created: {email}")
+            return str(user_id)
+
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            release_db(conn)
 
     @staticmethod
     def find_by_email(email: str) -> Optional[Dict]:
         """Find a user by email address."""
-        db = get_db()
-        return db[UserModel.COLLECTION].find_one(
-            {"email": email.lower().strip()}
-        )
+        conn = get_db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, name, email, password, created_at FROM users WHERE email = %s",
+                    (email.lower().strip(),),
+                )
+                row = cur.fetchone()
+                if row:
+                    return {
+                        "id": row[0],
+                        "name": row[1],
+                        "email": row[2],
+                        "password": row[3],
+                        "created_at": row[4],
+                    }
+                return None
+        finally:
+            release_db(conn)
 
     @staticmethod
     def find_by_id(user_id: str) -> Optional[Dict]:
-        """Find a user by their ObjectId."""
-        db = get_db()
+        """Find a user by their ID."""
+        conn = get_db()
         try:
-            return db[UserModel.COLLECTION].find_one(
-                {"_id": ObjectId(user_id)}
-            )
-        except Exception:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, name, email, password, created_at FROM users WHERE id = %s",
+                    (int(user_id),),
+                )
+                row = cur.fetchone()
+                if row:
+                    return {
+                        "id": row[0],
+                        "name": row[1],
+                        "email": row[2],
+                        "password": row[3],
+                        "created_at": row[4],
+                    }
+                return None
+        except (ValueError, TypeError):
             return None
+        finally:
+            release_db(conn)
 
     @staticmethod
     def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -102,9 +139,7 @@ class UserModel:
 
 
 class PDFModel:
-    """CRUD operations for the 'pdf_documents' collection."""
-
-    COLLECTION = "pdf_documents"
+    """CRUD operations for the 'pdf_documents' table."""
 
     @staticmethod
     def create(
@@ -129,64 +164,125 @@ class PDFModel:
         Returns:
             str: The inserted document's ID as a string.
         """
-        db = get_db()
+        conn = get_db()
 
-        # Deactivate any previously active PDF for this user
-        db[PDFModel.COLLECTION].update_many(
-            {"user_id": user_id, "is_active": True},
-            {"$set": {"is_active": False}},
-        )
+        try:
+            with conn.cursor() as cur:
+                # Deactivate any previously active PDF for this user
+                cur.execute(
+                    "UPDATE pdf_documents SET is_active = FALSE WHERE user_id = %s AND is_active = TRUE",
+                    (int(user_id),),
+                )
 
-        pdf_doc = {
-            "user_id": user_id,
-            "filename": filename,
-            "original_filename": original_filename,
-            "num_pages": num_pages,
-            "num_chunks": num_chunks,
-            "file_size_mb": round(file_size_mb, 2),
-            "uploaded_at": datetime.now(timezone.utc),
-            "is_active": True,
-        }
+                # Insert the new PDF record
+                cur.execute(
+                    """
+                    INSERT INTO pdf_documents (user_id, filename, original_filename, num_pages, num_chunks, file_size_mb)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (int(user_id), filename, original_filename, num_pages, num_chunks, round(file_size_mb, 2)),
+                )
+                pdf_id = cur.fetchone()[0]
+                conn.commit()
 
-        result = db[PDFModel.COLLECTION].insert_one(pdf_doc)
-        logger.info(f"PDF record created: {filename} for user {user_id}")
-        return str(result.inserted_id)
+            logger.info(f"PDF record created: {filename} for user {user_id}")
+            return str(pdf_id)
+
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            release_db(conn)
 
     @staticmethod
     def get_active_pdf(user_id: str) -> Optional[Dict]:
         """Get the currently active PDF for a user."""
-        db = get_db()
-        return db[PDFModel.COLLECTION].find_one(
-            {"user_id": user_id, "is_active": True}
-        )
+        conn = get_db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, user_id, filename, original_filename, num_pages, num_chunks, file_size_mb, uploaded_at, is_active
+                    FROM pdf_documents
+                    WHERE user_id = %s AND is_active = TRUE
+                    ORDER BY uploaded_at DESC
+                    LIMIT 1
+                    """,
+                    (int(user_id),),
+                )
+                row = cur.fetchone()
+                if row:
+                    return {
+                        "id": row[0],
+                        "user_id": row[1],
+                        "filename": row[2],
+                        "original_filename": row[3],
+                        "num_pages": row[4],
+                        "num_chunks": row[5],
+                        "file_size_mb": row[6],
+                        "uploaded_at": row[7],
+                        "is_active": row[8],
+                    }
+                return None
+        finally:
+            release_db(conn)
 
     @staticmethod
     def get_user_pdfs(user_id: str, limit: int = 20) -> List[Dict]:
         """Get all PDFs uploaded by a user (most recent first)."""
-        db = get_db()
-        cursor = (
-            db[PDFModel.COLLECTION]
-            .find({"user_id": user_id})
-            .sort("uploaded_at", -1)
-            .limit(limit)
-        )
-        return list(cursor)
+        conn = get_db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, user_id, filename, original_filename, num_pages, num_chunks, file_size_mb, uploaded_at, is_active
+                    FROM pdf_documents
+                    WHERE user_id = %s
+                    ORDER BY uploaded_at DESC
+                    LIMIT %s
+                    """,
+                    (int(user_id), limit),
+                )
+                rows = cur.fetchall()
+                return [
+                    {
+                        "id": row[0],
+                        "user_id": row[1],
+                        "filename": row[2],
+                        "original_filename": row[3],
+                        "num_pages": row[4],
+                        "num_chunks": row[5],
+                        "file_size_mb": row[6],
+                        "uploaded_at": row[7],
+                        "is_active": row[8],
+                    }
+                    for row in rows
+                ]
+        finally:
+            release_db(conn)
 
     @staticmethod
     def deactivate_all(user_id: str):
         """Deactivate all PDFs for a user (used on reset)."""
-        db = get_db()
-        db[PDFModel.COLLECTION].update_many(
-            {"user_id": user_id},
-            {"$set": {"is_active": False}},
-        )
-        logger.info(f"All PDFs deactivated for user {user_id}")
+        conn = get_db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE pdf_documents SET is_active = FALSE WHERE user_id = %s",
+                    (int(user_id),),
+                )
+                conn.commit()
+            logger.info(f"All PDFs deactivated for user {user_id}")
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            release_db(conn)
 
 
 class ChatModel:
-    """CRUD operations for the 'chat_history' collection."""
-
-    COLLECTION = "chat_history"
+    """CRUD operations for the 'chat_history' table."""
 
     @staticmethod
     def create(
@@ -207,19 +303,36 @@ class ChatModel:
         Returns:
             str: The inserted chat record's ID.
         """
-        db = get_db()
+        conn = get_db()
 
-        chat_doc = {
-            "user_id": user_id,
-            "pdf_id": pdf_id,
-            "question": question,
-            "answer": answer,
-            "created_at": datetime.now(timezone.utc),
-        }
+        try:
+            # Handle "unknown" pdf_id gracefully
+            pdf_id_int = None
+            try:
+                pdf_id_int = int(pdf_id)
+            except (ValueError, TypeError):
+                pdf_id_int = None
 
-        result = db[ChatModel.COLLECTION].insert_one(chat_doc)
-        logger.info(f"Chat saved for user {user_id}")
-        return str(result.inserted_id)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO chat_history (user_id, pdf_id, question, answer)
+                    VALUES (%s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (int(user_id), pdf_id_int, question, answer),
+                )
+                chat_id = cur.fetchone()[0]
+                conn.commit()
+
+            logger.info(f"Chat saved for user {user_id}")
+            return str(chat_id)
+
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            release_db(conn)
 
     @staticmethod
     def get_user_history(
@@ -232,24 +345,64 @@ class ChatModel:
 
         Returns most recent conversations first.
         """
-        db = get_db()
-        query = {"user_id": user_id}
-        if pdf_id:
-            query["pdf_id"] = pdf_id
+        conn = get_db()
+        try:
+            with conn.cursor() as cur:
+                if pdf_id:
+                    cur.execute(
+                        """
+                        SELECT id, user_id, pdf_id, question, answer, created_at
+                        FROM chat_history
+                        WHERE user_id = %s AND pdf_id = %s
+                        ORDER BY created_at DESC
+                        LIMIT %s
+                        """,
+                        (int(user_id), int(pdf_id), limit),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT id, user_id, pdf_id, question, answer, created_at
+                        FROM chat_history
+                        WHERE user_id = %s
+                        ORDER BY created_at DESC
+                        LIMIT %s
+                        """,
+                        (int(user_id), limit),
+                    )
 
-        cursor = (
-            db[ChatModel.COLLECTION]
-            .find(query)
-            .sort("created_at", -1)
-            .limit(limit)
-        )
-        return list(cursor)
+                rows = cur.fetchall()
+                return [
+                    {
+                        "id": row[0],
+                        "user_id": row[1],
+                        "pdf_id": row[2],
+                        "question": row[3],
+                        "answer": row[4],
+                        "created_at": row[5],
+                    }
+                    for row in rows
+                ]
+        finally:
+            release_db(conn)
 
     @staticmethod
     def delete_by_user(user_id: str):
         """Delete all chat history for a user."""
-        db = get_db()
-        result = db[ChatModel.COLLECTION].delete_many({"user_id": user_id})
-        logger.info(
-            f"Deleted {result.deleted_count} chat records for user {user_id}"
-        )
+        conn = get_db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM chat_history WHERE user_id = %s",
+                    (int(user_id),),
+                )
+                deleted = cur.rowcount
+                conn.commit()
+            logger.info(
+                f"Deleted {deleted} chat records for user {user_id}"
+            )
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            release_db(conn)
